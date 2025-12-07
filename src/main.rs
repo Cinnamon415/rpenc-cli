@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 use std::time::SystemTime;
-use std::usize;
 use tar::Builder;
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
@@ -212,8 +211,8 @@ fn decrypt_file(
 fn extract(input_archive: &File, output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let zstd_decoder = zstd::stream::read::Decoder::new(input_archive)?;
     let mut archive = tar::Archive::new(zstd_decoder);
-    std::fs::create_dir_all(&output_dir)?;
-    archive.unpack(&output_dir)?;
+    std::fs::create_dir_all(output_dir)?;
+    archive.unpack(output_dir)?;
     Ok(())
 }
 
@@ -229,12 +228,12 @@ fn archive(
 
     if path.is_file() {
         if path != programm_dir {
-            tar_builder.append_path_with_name(&path, path.file_name().unwrap())?;
+            tar_builder.append_path_with_name(path, path.file_name().unwrap())?;
         }
     } else if path.is_dir() {
-        for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
             let entry_path = entry.path();
-            let relative_path = entry_path.strip_prefix(&path)?;
+            let relative_path = entry_path.strip_prefix(path)?;
             if relative_path.as_os_str().is_empty() {
                 continue;
             }
@@ -300,10 +299,10 @@ fn get_files_list_from_dir(
         let entry = entry?;
         let path = entry.path();
         if path.is_file() {
-            if let Some(ext) = extension {
-                if path.extension().and_then(|s| s.to_str()) != Some(ext) {
-                    continue;
-                }
+            if let Some(ext) = extension
+                && path.extension().and_then(|s| s.to_str()) != Some(ext)
+            {
+                continue;
             }
             file_paths.push(path);
         }
@@ -360,7 +359,7 @@ fn create_file_name(
         return Ok(file_name);
     }
     let file_name = format!("{}.enc", name);
-    return Ok(file_name);
+    Ok(file_name)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -417,7 +416,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 NamedTempFile::new_in(env::current_exe().unwrap().parent().unwrap())?;
             decrypt_file(&input, temp_archive.as_file(), &get_password(false)?)?;
             let bar1 = CustomProgressBar::start("Extracting...")?;
-            extract(temp_archive.as_file(), &output)?;
+            extract(temp_archive.as_file(), output)?;
             CustomProgressBar::finish(bar1, "Archive successfully extracted");
         }
     }
