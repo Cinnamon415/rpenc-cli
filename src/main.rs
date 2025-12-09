@@ -88,7 +88,7 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error
     let params = Params::new(
         65536 * 4,      // memory size in KiB (64 MiB)
         100,            // time cost (number of iterations)
-        4,      // parallelism (number of threads)
+        4,              // parallelism (number of threads)
         Some(KEY_SIZE), // output length in bytes (32 for XChaCha20)
     )
     .map_err(|e| -> Box<dyn std::error::Error> { format!("Params init failed?: {}", e).into() })?;
