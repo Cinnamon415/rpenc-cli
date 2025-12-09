@@ -15,7 +15,6 @@ use std::fs::File;
 use std::io::Seek;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 use std::time::SystemTime;
 use tar::Builder;
@@ -86,17 +85,10 @@ impl CustomProgressBar {
 }
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let num_cores = thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or_else(|e| {
-            eprintln!("Can`t find cpu info: {}", e);
-            1 // Default value
-        });
-    let num_cores: u32 = num_cores as u32;
     let params = Params::new(
         65536 * 4,      // memory size in KiB (64 MiB)
         100,            // time cost (number of iterations)
-        num_cores,      // parallelism (number of threads)
+        4,      // parallelism (number of threads)
         Some(KEY_SIZE), // output length in bytes (32 for XChaCha20)
     )
     .map_err(|e| -> Box<dyn std::error::Error> { format!("Params init failed?: {}", e).into() })?;
