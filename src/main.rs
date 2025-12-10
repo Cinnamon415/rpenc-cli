@@ -370,12 +370,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .parent()
                     .and_then(|p| p.parent())
+                    .and_then(|p| p.parent())
                     .unwrap_or_else(|| Path::new("."))
                     .to_path_buf()
             });
-            let output = &output
-                .clone()
-                .unwrap_or_else(|| env::current_exe().unwrap().parent().unwrap().to_path_buf());
+            let output = &output.clone().unwrap_or_else(|| {
+                env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .unwrap()
+                    .join("encrypted")
+                    .to_path_buf()});
             let bar0 = CustomProgressBar::start("Archivating...")?;
             let temp_archive = NamedTempFile::new_in(output)?;
             archive(&input, temp_archive.as_file(), *delete_files, &programm_dir)?;
@@ -400,6 +406,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 env::current_exe()
                     .unwrap()
                     .parent()
+                    .and_then(|p| p.parent())
                     .and_then(|p| p.parent())
                     .unwrap()
                     .to_path_buf()
