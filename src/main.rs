@@ -381,7 +381,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|p| p.parent())
                     .unwrap()
                     .join("encrypted")
-                    .to_path_buf()});
+                    .to_path_buf()
+            });
             let bar0 = CustomProgressBar::start("Archivating...")?;
             let temp_archive = NamedTempFile::new_in(output)?;
             archive(&input, temp_archive.as_file(), *delete_files, &programm_dir)?;
