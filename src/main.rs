@@ -402,7 +402,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Decrypt { input, output } => {
             let input = input.clone().unwrap_or_else(|| {
                 get_files_to_decrypt(
-                    env::current_exe()
+                env::current_exe()
                         .unwrap()
                         .parent()
                         .and_then(|p| p.parent())
@@ -424,7 +424,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .to_path_buf()
             });
             let temp_archive = NamedTempFile::new_in(
-                env::current_exe()
+            env::current_exe()
                     .unwrap()
                     .parent()
                     .and_then(|p| p.parent())
