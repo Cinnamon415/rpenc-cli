@@ -87,7 +87,7 @@ impl CustomProgressBar {
 fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let params = Params::new(
         65536 * 4,      // memory size in KiB (64 MiB)
-        100,            // time cost (number of iterations)
+        10,             // time cost (number of iterations)
         4,              // parallelism (number of threads)
         Some(KEY_SIZE), // output length in bytes (32 for XChaCha20)
     )
@@ -356,7 +356,12 @@ fn create_file_name(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let programm_dir = env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let programm_dir = env::current_exe()
+        .unwrap()
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap()
+        .to_path_buf();
     match &cli.command {
         Commands::Encrypt {
             input,
@@ -381,7 +386,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|p| p.parent())
                     .unwrap()
                     .join("encrypted")
-                    .to_path_buf()
             });
             let bar0 = CustomProgressBar::start("Archivating...")?;
             let temp_archive = NamedTempFile::new_in(output)?;
@@ -397,11 +401,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Decrypt { input, output } => {
             let input = input.clone().unwrap_or_else(|| {
-                get_files_to_decrypt(PathBuf::from(env::current_exe().unwrap().parent().unwrap()))
-                    .unwrap_or_else(|err| {
-                        eprintln!("Error getting file to decrypt: {}", err);
-                        std::process::exit(1);
-                    })
+                get_files_to_decrypt(
+                env::current_exe()
+                        .unwrap()
+                        .parent()
+                        .and_then(|p| p.parent())
+                        .unwrap()
+                        .join("encrypted"),
+                )
+                .unwrap_or_else(|err| {
+                    eprintln!("Error getting file to decrypt: {}", err);
+                    std::process::exit(1);
+                })
             });
             let output = &output.clone().unwrap_or_else(|| {
                 env::current_exe()
@@ -412,8 +423,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .to_path_buf()
             });
-            let temp_archive =
-                NamedTempFile::new_in(env::current_exe().unwrap().parent().unwrap())?;
+            let temp_archive = NamedTempFile::new_in(
+            env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join("encrypted"),
+            )?;
             decrypt_file(&input, temp_archive.as_file(), &get_password(false)?)?;
             let bar1 = CustomProgressBar::start("Extracting...")?;
             extract(temp_archive.as_file(), output)?;
