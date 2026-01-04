@@ -1,7 +1,7 @@
 pub static LICENSE: &str = r#"
 MIT License
 
-Copyright (c) 2025 Cinnamon415
+Copyright (c) 2025-2026 Cinnamon415
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@ pub static SOURCE: &str = r#"https://github.com/Cinnamon415/rpenc-cli"#;
 
 pub mod renc_core;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, crate_authors, crate_name, crate_version};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
 use rpassword::prompt_password;
@@ -38,7 +38,7 @@ use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(name = crate_name!(), author = crate_authors!(), version = crate_version!(), about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -66,6 +66,7 @@ enum Commands {
         #[arg(short = 'd', long)]
         remove_origin: bool,
     },
+    License {},
 }
 
 struct CustomProgressBar;
@@ -290,6 +291,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             renc_core::extract(temp_archive.as_file(), output)?;
             CustomProgressBar::finish(bar1, "Archive successfully extracted");
             println!("Archive succesfully extracted");
+        }
+        Commands::License {} => {
+            println!("{}", LICENSE);
         }
     }
     Ok(())
