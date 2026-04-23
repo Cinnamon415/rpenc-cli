@@ -3,7 +3,7 @@ name = "rpenc"
 version = "1.0.0"
 edition = "2024"
 license = "MIT"
-authors = ["Cinnamon415 <248340784+Cinnamon415@users.noreply.github.com>"]
+authors = ["Cinnamon415 248340784+Cinnamon415@users.noreply.github.com"]
 
 [dependencies]
 argon2 = "0.5.3"

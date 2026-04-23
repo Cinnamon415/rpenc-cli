@@ -29,7 +29,7 @@ pub mod renc_core;
 use clap::{Parser, Subcommand, crate_authors, crate_name, crate_version};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
-use rpassword::prompt_password;
+use rpassword;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::time::SystemTime;
@@ -99,9 +99,9 @@ impl CustomProgressBar {
 
 fn get_password(is_encrypting: bool) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
     loop {
-        let password = Zeroizing::new(prompt_password("Enter your password: ")?);
+        let password = Zeroizing::new(rpassword::prompt_password("Enter your password: ")?);
         if is_encrypting {
-            let password1 = Zeroizing::new(prompt_password("Confirm password: ")?);
+            let password1 = Zeroizing::new(rpassword::prompt_password("Confirm password: ")?);
             if password != password1 {
                 println!("Passwords don't match, try again")
             } else {
@@ -231,13 +231,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             CustomProgressBar::finish(bar0, "Archive successfully created");
             let temp_archive_path = temp_archive.into_temp_path();
             println!("Encrypting {} - {}", input.display(), &output.display()); //debug
-            let bar1 = CustomProgressBar::start("Encrypting...")?;
+            //let bar1 = CustomProgressBar::start("Encrypting...")?;
             renc_core::encrypt_file(
                 &temp_archive_path.to_path_buf(),
                 &output.join(create_file_name(file_name, *full)?),
                 &get_password(true)?,
             )?;
-            CustomProgressBar::finish(bar1, "Encryption successful");
+            //CustomProgressBar::finish(bar1, "Encryption successful");
         }
         Commands::Decrypt {
             input,
@@ -279,14 +279,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .join("encrypted"),
             )?;
-            let bar0 = CustomProgressBar::start("Decrypting...")?;
+            //let bar0 = CustomProgressBar::start("Decrypting...")?;
             renc_core::decrypt_file(
                 &input,
                 temp_archive.as_file(),
                 &get_password(false)?,
                 *remove_origin,
             )?;
-            CustomProgressBar::finish(bar0, "Decryption successful");
+            //CustomProgressBar::finish(bar0, "Decryption successful");
             let bar1 = CustomProgressBar::start("Extracting...")?;
             renc_core::extract(temp_archive.as_file(), output)?;
             CustomProgressBar::finish(bar1, "Archive successfully extracted");
