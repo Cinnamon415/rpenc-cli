@@ -139,11 +139,9 @@ fn get_files_to_decrypt(dir: PathBuf) -> Result<PathBuf, Box<dyn std::error::Err
     }
     let len = file_list.len();
     loop {
-        let mut n = 1;
         println!("Choose file to decrypt:");
-        for file_path in &file_list {
+        for (n, file_path) in (1..).zip(file_list.iter()) {
             println!("  {}. {}", n, file_path.display());
-            n += 1;
         }
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
@@ -229,11 +227,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             CustomProgressBar::finish(bar0, "Archive successfully created");
             let temp_archive_path = temp_archive.into_temp_path();
+            let password = get_password(true)?;
             let bar1 = CustomProgressBar::start("Encrypting...")?;
             renc_core::encrypt_file(
                 &temp_archive_path.to_path_buf(),
                 &output.join(create_file_name(file_name, *full)?),
-                &get_password(true)?,
+                &password,
             )?;
             CustomProgressBar::finish(bar1, "Encryption successful");
         }
@@ -277,13 +276,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap()
                     .join("encrypted"),
             )?;
+            let password = get_password(false)?;
             let bar0 = CustomProgressBar::start("Decrypting...")?;
-            renc_core::decrypt_file(
-                &input,
-                temp_archive.as_file(),
-                &get_password(false)?,
-                *remove_origin,
-            )?;
+            renc_core::decrypt_file(&input, temp_archive.as_file(), &password, *remove_origin)?;
             CustomProgressBar::finish(bar0, "Decryption successful");
             let bar1 = CustomProgressBar::start("Extracting...")?;
             renc_core::extract(temp_archive.as_file(), output)?;

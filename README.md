@@ -3,8 +3,8 @@ Rust Portable ENCryption tool made to protect your data on portable(or not) driv
 
 Launch *generator.sh* or *generator.bat* to generate rpenc folders and files in folder of launch. 
 Launch *rpenc.sh* or *rpenc.bat* from command line to start rpenc.
-- [Usage](#Usage)
 - [Installation](#Installation)
+- [Usage](#Usage)
 - [File naming](#File-naming)
 - [Progress](#Progress)
 

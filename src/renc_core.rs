@@ -30,7 +30,7 @@ use argon2::{
 };
 use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
-    aead::{Aead, KeyInit, OsRng, rand_core::RngCore},
+    aead::{Aead, KeyInit, OsRng, Payload, rand_core::RngCore},
 };
 use std::fs;
 use std::fs::File;
@@ -39,16 +39,22 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use tar::Builder;
 use walkdir::WalkDir;
+use zeroize::Zeroizing;
 use zstd::stream::write::Encoder;
 
 const NONCE_SIZE: usize = 24;
 const SALT_SIZE: usize = 16;
 const KEY_SIZE: usize = 32;
+const MAGIC: &[u8; 4] = b"RPEN";
+const FORMAT_VERSION: u8 = 1;
 
-fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn derive_key(
+    password: &str,
+    salt: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, Box<dyn std::error::Error>> {
     let params = Params::new(
-        65536 * 4,      // memory size in KiB
-        10,             // time cost (number of iterations)
+        65536,          // memory size in KiB (64 MB)
+        3,              // time cost (number of iterations)
         4,              // parallelism (number of threads)
         Some(KEY_SIZE), // output length in bytes (32 for XChaCha20)
     )
@@ -61,7 +67,7 @@ fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error
     let hash = argon2.hash_password(password.as_bytes(), &salt).map_err(
         |e| -> Box<dyn std::error::Error> { format!("Hash creation failed: {}", e).into() },
     )?;
-    Ok(hash.hash.unwrap().as_bytes().to_vec())
+    Ok(Zeroizing::new(hash.hash.unwrap().as_bytes().to_vec()))
 }
 
 pub fn encrypt_file(
@@ -73,6 +79,10 @@ pub fn encrypt_file(
     let output = File::create(output_path)?;
     let mut output = BufWriter::new(output);
 
+    // Write file header: magic bytes + format version
+    output.write_all(MAGIC)?;
+    output.write_all(&[FORMAT_VERSION])?;
+
     let mut salt = [0u8; SALT_SIZE];
     OsRng.fill_bytes(&mut salt);
     output.write_all(&salt)?;
@@ -83,6 +93,7 @@ pub fn encrypt_file(
             format!("Cipher init failed: {}", e).into()
         })?;
 
+    let mut chunk_index: u64 = 0;
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
         let n = input.read(&mut buffer)?;
@@ -95,13 +106,25 @@ pub fn encrypt_file(
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = XNonce::from(nonce_bytes);
 
-        let ciphertext: Vec<u8> = cipher.encrypt(&nonce, plaintext.as_ref()).map_err(
-            |e| -> Box<dyn std::error::Error> { format!("Frame encryption failed: {}", e).into() },
-        )?;
+        // Use chunk index as AAD to prevent reordering/deletion/duplication
+        let aad = chunk_index.to_be_bytes();
+        let payload = Payload {
+            msg: plaintext,
+            aad: &aad,
+        };
+
+        let ciphertext: Vec<u8> =
+            cipher
+                .encrypt(&nonce, payload)
+                .map_err(|e| -> Box<dyn std::error::Error> {
+                    format!("Frame encryption failed: {}", e).into()
+                })?;
 
         output.write_all(&nonce_bytes)?;
-        output.write_all(&(ciphertext.len() as u32).to_be_bytes())?;
+        output.write_all(&(ciphertext.len() as u64).to_be_bytes())?;
         output.write_all(&ciphertext)?;
+
+        chunk_index += 1;
     }
 
     output.flush()?;
@@ -117,6 +140,23 @@ pub fn decrypt_file(
     let mut input = BufReader::new(File::open(input_path)?);
     let mut output = BufWriter::new(output);
 
+    // Read and validate file header
+    let mut magic = [0u8; 4];
+    input.read_exact(&mut magic)?;
+    if &magic != MAGIC {
+        return Err("Invalid file format: not an rpenc encrypted file".into());
+    }
+
+    let mut version = [0u8; 1];
+    input.read_exact(&mut version)?;
+    if version[0] != FORMAT_VERSION {
+        return Err(format!(
+            "Unsupported format version: {} (expected {})",
+            version[0], FORMAT_VERSION
+        )
+        .into());
+    }
+
     let mut salt = [0u8; SALT_SIZE];
     input.read_exact(&mut salt)?;
 
@@ -126,25 +166,38 @@ pub fn decrypt_file(
             format!("Cipher init failed: {}", e).into()
         })?;
 
+    let mut chunk_index: u64 = 0;
     let mut nonce_bytes = [0u8; NONCE_SIZE];
-    let mut len_bytes = [0u8; 4];
+    let mut len_bytes = [0u8; 8];
     let mut ciphertext = Vec::new();
 
     loop {
         match input.read_exact(&mut nonce_bytes) {
             Ok(()) => {
                 input.read_exact(&mut len_bytes)?;
-                let len = u32::from_be_bytes(len_bytes) as usize;
+                let len = u64::from_be_bytes(len_bytes) as usize;
                 ciphertext.resize(len, 0);
                 input.read_exact(&mut ciphertext)?;
 
+                // Verify chunk index via AAD to detect reordering/deletion/duplication
+                let aad = chunk_index.to_be_bytes();
+                let payload = Payload {
+                    msg: ciphertext.as_slice(),
+                    aad: &aad,
+                };
+
                 let plaintext = cipher
-                    .decrypt(&XNonce::from(nonce_bytes), ciphertext.as_slice())
+                    .decrypt(&XNonce::from(nonce_bytes), payload)
                     .map_err(|e| -> Box<dyn std::error::Error> {
-                        format!("Frame decryption failed: {}", e).into()
+                        format!(
+                            "Frame decryption failed at chunk {}: {} (wrong password or corrupted data)",
+                            chunk_index, e
+                        )
+                        .into()
                     })?;
 
                 output.write_all(&plaintext)?;
+                chunk_index += 1;
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 break;
