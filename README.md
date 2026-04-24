@@ -3,8 +3,8 @@ Rust Portable ENCryption tool made to protect your data on portable(or not) driv
 
 Launch *generator.sh* or *generator.bat* to generate rpenc folders and files in folder of launch. 
 Launch *rpenc.sh* or *rpenc.bat* from command line to start rpenc.
-- [Installation](#Installation)
 - [Usage](#Usage)
+- [Installation](#Installation)
 - [File naming](#File-naming)
 - [Progress](#Progress)
 
@@ -70,7 +70,6 @@ Use `--delete-origins` or `-d` for `encrypt` if you want to delete files and fol
 - [x] Archivating
 - [x] Encrypting/Decrypting
 - [x] Arguments
-- [x] CD/CI
 - [ ] Config
 - [ ] GUI
 - [ ] AES-mode and hardware acceleration
@@ -85,8 +84,6 @@ If you'd like to help test **rpenc-cli** across different platforms:
    - Your operating system name and version (e.g., Windows 11 22H2, macOS Sonoma 14.5, Ubuntu 24.04)
    - Clear steps to reproduce the problem
 
-> 💡 **Tip**: Test both encryption and decryption workflows with different file types
-
 > 🏆 **Bug Hunters**: Users who report verified issues will be credited in the **Special Thanks** section of next release notes!
 
 Your feedback is greatly appreciated and helps make rpenc-cli more reliable for everyone.
@@ -94,4 +91,4 @@ Your feedback is greatly appreciated and helps make rpenc-cli more reliable for 
 ---
 
 ### Important Note
-All recent changes are currently available **only in the beta branch** because I lack access to multiple operating systems for comprehensive testing. **Your contribution** by testing on your system would be invaluable to ensure cross-platform compatibility.
+Since I don't have access to multiple operating systems for comprehensive testing, I cannot guarantee seamless operation of ***RPENC*** on all devices. **Your contribution** by testing on your device would be invaluable to ensure cross-platform compatibility.
