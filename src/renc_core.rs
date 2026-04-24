@@ -41,40 +41,9 @@ use tar::Builder;
 use walkdir::WalkDir;
 use zstd::stream::write::Encoder;
 
-use indicatif::{ProgressBar, ProgressStyle};
-use std::time::Duration;
-
 const NONCE_SIZE: usize = 24;
 const SALT_SIZE: usize = 16;
 const KEY_SIZE: usize = 32;
-
-struct CustomProgressBar;
-
-impl CustomProgressBar {
-    fn start(msg: &str) -> Result<ProgressBar, Box<dyn std::error::Error>> {
-        let bar = ProgressBar::new_spinner();
-        bar.enable_steady_tick(Duration::from_millis(166));
-        bar.set_style(
-            ProgressStyle::with_template("{spinner:.blue} {msg} {elapsed}")
-                .unwrap()
-                // https://github.com/sindresorhus/cli-spinners/blob/master/spinners.json
-                .tick_strings(&[
-                    "▹▹▹▹▹",
-                    "▸▹▹▹▹",
-                    "▹▸▹▹▹",
-                    "▹▹▸▹▹",
-                    "▹▹▹▸▹",
-                    "▹▹▹▹▸",
-                    "▪▪▪▪▪",
-                ]),
-        );
-        bar.set_message(msg.to_string());
-        Ok(bar)
-    }
-    fn finish(bar: ProgressBar, msg: &str) {
-        bar.finish_with_message(msg.to_string());
-    }
-}
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let params = Params::new(
@@ -100,7 +69,6 @@ pub fn encrypt_file(
     output_path: &PathBuf,
     password: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let bar1 = CustomProgressBar::start("Encrypting...")?;
     let mut input = BufReader::new(File::open(input_path)?);
     let output = File::create(output_path)?;
     let mut output = BufWriter::new(output);
@@ -137,7 +105,6 @@ pub fn encrypt_file(
     }
 
     output.flush()?;
-    CustomProgressBar::finish(bar1, "Encryption successful");
     Ok(())
 }
 
@@ -147,7 +114,6 @@ pub fn decrypt_file(
     password: &str,
     remove_origin: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let bar0 = CustomProgressBar::start("Decrypting...")?;
     let mut input = BufReader::new(File::open(input_path)?);
     let mut output = BufWriter::new(output);
 
@@ -192,7 +158,6 @@ pub fn decrypt_file(
     if remove_origin {
         std::fs::remove_file(input_path)?;
     }
-    CustomProgressBar::finish(bar0, "Decryption successful");
     Ok(())
 }
 
