@@ -1,4 +1,6 @@
 # rpenc-cli
+[Русский](README_RU.md) [English](README.md)
+
 Rust Portable ENCryption tool made to protect your data on portable(or not) drives.
 
 Launch *generator.sh* or *generator.bat* to generate rpenc folders and files in folder of launch. 
@@ -55,7 +57,7 @@ Options:
   -d, --delete-origin
   -h, --help             Print help
 ```
-Whithout arguments --input or --output `rpenc encrypt` encrypts your files in parent directory of rpenc dir. Encrypted files for default are stored in `rpenc/encrypted/`.
+Without arguments --input or --output `rpenc encrypt` encrypts your files in parent directory of rpenc dir. Encrypted files for default are stored in `rpenc/encrypted/`.
 **Input and output args must be directories**
 Use `--delete-origins` or `-d` for `encrypt` if you want to delete files and folders that will be encrypted.
 

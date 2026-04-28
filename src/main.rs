@@ -24,11 +24,14 @@ SOFTWARE.
 
 pub static SOURCE: &str = r#"https://github.com/Cinnamon415/rpenc-cli"#;
 
+pub mod config;
 pub mod renc_core;
 
 use clap::{Parser, Subcommand, crate_authors, crate_name, crate_version};
+use config::Config;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::time::SystemTime;
@@ -39,6 +42,12 @@ use zeroize::Zeroizing;
 #[derive(Parser)]
 #[command(name = crate_name!(), author = crate_authors!(), version = crate_version!(), about, long_about = None)]
 struct Cli {
+    /// Override the path returned by env::current_exe().
+    /// Used by rpenc.sh when launching via ld-linux or /tmp copy,
+    /// where current_exe() would return wrong path.
+    #[arg(long, hide = true)]
+    real_exe: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -68,40 +77,79 @@ enum Commands {
     License {},
 }
 
-struct CustomProgressBar;
+/// Progress indicator that adapts to the environment:
+/// - With TTY: animated spinner via indicatif
+/// - Without TTY: plain text messages to stderr
+enum Progress {
+    Interactive(ProgressBar),
+    Plain,
+}
 
-impl CustomProgressBar {
-    fn start(msg: &str) -> Result<ProgressBar, Box<dyn std::error::Error>> {
-        let bar = ProgressBar::new_spinner();
-        bar.enable_steady_tick(Duration::from_millis(166));
-        bar.set_style(
-            ProgressStyle::with_template("{spinner:.blue} {msg} {elapsed}")
-                .unwrap()
-                // https://github.com/sindresorhus/cli-spinners/blob/master/spinners.json
-                .tick_strings(&[
-                    "▹▹▹▹▹",
-                    "▸▹▹▹▹",
-                    "▹▸▹▹▹",
-                    "▹▹▸▹▹",
-                    "▹▹▹▸▹",
-                    "▹▹▹▹▸",
-                    "▪▪▪▪▪",
-                ]),
-        );
-        bar.set_message(msg.to_string());
-        Ok(bar)
+impl Progress {
+    fn start(
+        msg: &str,
+        pb_config: &config::ProgressBarConfig,
+    ) -> Result<Progress, Box<dyn std::error::Error>> {
+        if io::stderr().is_terminal() {
+            let bar = ProgressBar::new_spinner();
+            bar.enable_steady_tick(Duration::from_millis(pb_config.tick_interval_ms));
+
+            let tick_refs: Vec<&str> =
+                pb_config.tick_strings.iter().map(|s| s.as_str()).collect();
+            bar.set_style(
+                ProgressStyle::with_template(&pb_config.template)
+                    .map_err(|e| format!("Invalid progressbar template in config: {}", e))?
+                    .tick_strings(&tick_refs),
+            );
+            bar.set_message(msg.to_string());
+            Ok(Progress::Interactive(bar))
+        } else {
+            eprintln!("{}", msg);
+            Ok(Progress::Plain)
+        }
     }
-    fn finish(bar: ProgressBar, msg: &str) {
-        bar.finish_with_message(msg.to_string());
+
+    fn finish(self, msg: &str) {
+        match self {
+            Progress::Interactive(bar) => bar.finish_with_message(msg.to_string()),
+            Progress::Plain => eprintln!("{}", msg),
+        }
+    }
+}
+
+/// Read password from TTY (interactive) or stdin (piped/scripted).
+/// When stdin is not a terminal, reads one line per password from stdin without prompts.
+fn read_password_line(prompt: &str) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+    if io::stdin().is_terminal() {
+        // Interactive: use rpassword to hide input
+        Ok(Zeroizing::new(rpassword::prompt_password(prompt)?))
+    } else {
+        // Non-interactive (pipe, redirect, script): read from stdin
+        let mut line = String::new();
+        io::stdin().lock().read_line(&mut line)?;
+        // Remove trailing newline
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        if line.is_empty() {
+            return Err("Empty password received from stdin".into());
+        }
+        Ok(Zeroizing::new(line))
     }
 }
 
 fn get_password(is_encrypting: bool) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
     loop {
-        let password = Zeroizing::new(rpassword::prompt_password("Enter your password: ")?);
+        let password = read_password_line("Enter your password: ")?;
         if is_encrypting {
-            let password1 = Zeroizing::new(rpassword::prompt_password("Confirm password: ")?);
+            let password1 = read_password_line("Confirm password: ")?;
             if password != password1 {
+                if !io::stdin().is_terminal() {
+                    return Err("Passwords don't match (non-interactive mode, cannot retry)".into());
+                }
                 println!("Passwords don't match, try again")
             } else {
                 return Ok(password);
@@ -163,17 +211,36 @@ fn get_files_to_decrypt(dir: PathBuf) -> Result<PathBuf, Box<dyn std::error::Err
     }
 }
 
+fn sanitize_filename(name: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // Reject path separators and traversal
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(format!(
+            "Invalid filename '{}': must not contain '/', '\\', or '..'",
+            name
+        )
+        .into());
+    }
+    // Reject empty or whitespace-only names
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Filename must not be empty".into());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn create_file_name(
     name: &Option<String>,
     is_full: bool,
+    default_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let name = name.as_deref().unwrap_or("encrypted-data");
+    let name = name.as_deref().unwrap_or(default_name);
+    let name = sanitize_filename(name)?;
     let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
     if !is_full {
         let file_name = format!(
-            "{}-{:?}-{}.enc",
+            "{}-{}-{}.enc",
             name,
-            now,
+            now.as_secs(),
             rand::rng().random_range(1000..=9999)
         );
         return Ok(file_name);
@@ -184,12 +251,41 @@ fn create_file_name(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let programm_dir = env::current_exe()
-        .unwrap()
+
+    // Use --real-exe if provided (from rpenc.sh fallback), otherwise env::current_exe()
+    let exe_path = cli.real_exe.clone().unwrap_or_else(|| {
+        env::current_exe().unwrap_or_else(|e| {
+            eprintln!(
+                "Error: cannot determine executable path: {}. \
+                 Use --real-exe to specify it manually.",
+                e
+            );
+            std::process::exit(1);
+        })
+    });
+
+    // exe_path = .../rpenc/bin/rpenc-linux-x86_64
+    // rpenc_dir = .../rpenc/          (parent of parent)
+    // root_dir  = .../                (parent of rpenc_dir, i.e. USB root)
+    let rpenc_dir = exe_path
         .parent()
         .and_then(|p| p.parent())
-        .unwrap()
+        .ok_or_else(|| {
+            format!(
+                "Error: executable path '{}' must be at least 2 levels deep (e.g. rpenc/bin/rpenc)",
+                exe_path.display()
+            )
+        })?
         .to_path_buf();
+    let root_dir = rpenc_dir
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+
+    // Load config from rpenc/config.toml
+    let cfg = Config::load(&rpenc_dir);
+
+    let program_dir = rpenc_dir.clone();
     let mut custom_output = true;
     match &cli.command {
         Commands::Encrypt {
@@ -199,42 +295,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             file_name,
             full,
         } => {
-            let input = input.clone().unwrap_or_else(|| {
-                env::current_exe()
-                    .unwrap()
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .and_then(|p| p.parent())
-                    .unwrap_or_else(|| Path::new("."))
-                    .to_path_buf()
-            });
-            let output = &output.clone().unwrap_or_else(|| {
-                env::current_exe()
-                    .unwrap()
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .unwrap()
-                    .join("encrypted")
-            });
+            let input = input.clone().unwrap_or_else(|| root_dir.clone());
+            let output = &output
+                .clone()
+                .unwrap_or_else(|| rpenc_dir.join(&cfg.defaults.output_dir));
             fs::create_dir_all(output)?;
-            let bar0 = CustomProgressBar::start("Archiving...")?;
+            let bar0 = Progress::start("Archiving...", &cfg.progressbar)?;
             let temp_archive = NamedTempFile::new_in(output)?;
             renc_core::archive(
                 &input,
                 temp_archive.as_file(),
                 *delete_origins,
-                &programm_dir,
+                &program_dir,
+                cfg.archive.compression_level,
             )?;
-            CustomProgressBar::finish(bar0, "Archive successfully created");
+            bar0.finish("Archive successfully created");
             let temp_archive_path = temp_archive.into_temp_path();
             let password = get_password(true)?;
-            let bar1 = CustomProgressBar::start("Encrypting...")?;
+            let bar1 = Progress::start("Encrypting...", &cfg.progressbar)?;
             renc_core::encrypt_file(
                 &temp_archive_path.to_path_buf(),
-                &output.join(create_file_name(file_name, *full)?),
+                &output.join(create_file_name(file_name, *full, &cfg.defaults.default_name)?),
                 &password,
+                Some(cfg.crypto.argon2_m_cost),
+                Some(cfg.crypto.argon2_t_cost),
+                Some(cfg.crypto.argon2_p_cost),
+                Some(cfg.crypto.chunk_size),
             )?;
-            CustomProgressBar::finish(bar1, "Encryption successful");
+            bar1.finish("Encryption successful");
         }
         Commands::Decrypt {
             input,
@@ -242,47 +330,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             remove_origin,
         } => {
             let input = input.clone().unwrap_or_else(|| {
-                get_files_to_decrypt(
-                    env::current_exe()
-                        .unwrap()
-                        .parent()
-                        .and_then(|p| p.parent())
-                        .unwrap()
-                        .join("encrypted"),
+                get_files_to_decrypt(rpenc_dir.join(&cfg.defaults.output_dir)).unwrap_or_else(
+                    |err| {
+                        eprintln!("Error getting file to decrypt: {}", err);
+                        std::process::exit(1);
+                    },
                 )
-                .unwrap_or_else(|err| {
-                    eprintln!("Error getting file to decrypt: {}", err);
-                    std::process::exit(1);
-                })
             });
             let output = &output.clone().unwrap_or_else(|| {
                 custom_output = false;
-                env::current_exe()
-                    .unwrap()
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .and_then(|p| p.parent())
-                    .unwrap()
-                    .to_path_buf()
+                root_dir.clone()
             });
             if custom_output {
                 fs::create_dir_all(output)?;
             }
-            let temp_archive = NamedTempFile::new_in(
-                env::current_exe()
-                    .unwrap()
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .unwrap()
-                    .join("encrypted"),
-            )?;
+            let encrypted_dir = rpenc_dir.join(&cfg.defaults.output_dir);
+            fs::create_dir_all(&encrypted_dir)?;
+            let temp_archive = NamedTempFile::new_in(&encrypted_dir)?;
             let password = get_password(false)?;
-            let bar0 = CustomProgressBar::start("Decrypting...")?;
+            let bar0 = Progress::start("Decrypting...", &cfg.progressbar)?;
             renc_core::decrypt_file(&input, temp_archive.as_file(), &password, *remove_origin)?;
-            CustomProgressBar::finish(bar0, "Decryption successful");
-            let bar1 = CustomProgressBar::start("Extracting...")?;
+            bar0.finish("Decryption successful");
+            let bar1 = Progress::start("Extracting...", &cfg.progressbar)?;
             renc_core::extract(temp_archive.as_file(), output)?;
-            CustomProgressBar::finish(bar1, "Archive successfully extracted");
+            bar1.finish("Archive successfully extracted");
         }
         Commands::License {} => {
             println!("{}", LICENSE);
