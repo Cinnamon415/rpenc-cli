@@ -68,7 +68,11 @@ impl TryFrom<u8> for CipherId {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(CipherId::XChaCha20Poly1305),
-            _ => Err(format!("Unknown cipher algorithm ID: {}. This file may require a newer version of rpenc", value).into()),
+            _ => Err(format!(
+                "Unknown cipher algorithm ID: {}. This file may require a newer version of rpenc",
+                value
+            )
+            .into()),
         }
     }
 }
@@ -85,7 +89,11 @@ impl TryFrom<u8> for KdfId {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(KdfId::Argon2id),
-            _ => Err(format!("Unknown KDF algorithm ID: {}. This file may require a newer version of rpenc", value).into()),
+            _ => Err(format!(
+                "Unknown KDF algorithm ID: {}. This file may require a newer version of rpenc",
+                value
+            )
+            .into()),
         }
     }
 }
@@ -207,7 +215,8 @@ impl FileHeader {
                     return Err(format!(
                         "Invalid v2 header: length {} is too short (minimum 21 bytes)",
                         header_len
-                    ).into());
+                    )
+                    .into());
                 }
 
                 // Read the entire params block
@@ -231,7 +240,8 @@ impl FileHeader {
                     return Err(format!(
                         "Invalid header: salt_size {} exceeds header length {}",
                         salt_size, header_len
-                    ).into());
+                    )
+                    .into());
                 }
 
                 let salt = header_data[21..21 + salt_size as usize].to_vec();
@@ -239,8 +249,10 @@ impl FileHeader {
                 // Validate params
                 if argon2_m_cost < 8192 {
                     return Err(format!(
-                        "Invalid argon2 m_cost: {} (minimum 8192 = 8 MB)", argon2_m_cost
-                    ).into());
+                        "Invalid argon2 m_cost: {} (minimum 8192 = 8 MB)",
+                        argon2_m_cost
+                    )
+                    .into());
                 }
                 if argon2_t_cost < 1 {
                     return Err("Invalid argon2 t_cost: must be at least 1".into());
@@ -249,14 +261,14 @@ impl FileHeader {
                     return Err("Invalid argon2 p_cost: must be at least 1".into());
                 }
                 if chunk_size < 1024 {
-                    return Err(format!(
-                        "Invalid chunk_size: {} (minimum 1024 bytes)", chunk_size
-                    ).into());
+                    return Err(
+                        format!("Invalid chunk_size: {} (minimum 1024 bytes)", chunk_size).into(),
+                    );
                 }
                 if chunk_size > 16 * 1024 * 1024 {
-                    return Err(format!(
-                        "Invalid chunk_size: {} (maximum 16 MB)", chunk_size
-                    ).into());
+                    return Err(
+                        format!("Invalid chunk_size: {} (maximum 16 MB)", chunk_size).into(),
+                    );
                 }
 
                 Ok(FileHeader {
@@ -277,7 +289,8 @@ impl FileHeader {
                 "Unsupported format version: {} (this rpenc supports versions 1-2). \
                  You may need a newer version of rpenc",
                 version
-            ).into()),
+            )
+            .into()),
         }
     }
 
@@ -295,13 +308,9 @@ fn derive_key(
     p_cost: u32,
     key_size: usize,
 ) -> Result<Zeroizing<Vec<u8>>, Box<dyn std::error::Error>> {
-    let params = Params::new(
-        m_cost,
-        t_cost,
-        p_cost,
-        Some(key_size),
-    )
-    .map_err(|e| -> Box<dyn std::error::Error> { format!("Params init failed: {}", e).into() })?;
+    let params = Params::new(m_cost, t_cost, p_cost, Some(key_size)).map_err(
+        |e| -> Box<dyn std::error::Error> { format!("Params init failed: {}", e).into() },
+    )?;
 
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let salt = SaltString::encode_b64(salt).map_err(|e| -> Box<dyn std::error::Error> {
@@ -442,7 +451,8 @@ pub fn decrypt_file(
                         "Encrypted file is truncated at chunk {} (reading nonce): \
                          the file has trailing garbage or was not fully written to disk",
                         chunk_index
-                    ).into());
+                    )
+                    .into());
                 }
             }
             Err(e) => return Err(e.into()),
@@ -450,54 +460,57 @@ pub fn decrypt_file(
 
         // Nonce read successfully — now read the rest of the chunk
         {
-                if let Err(_e) = input.read_exact(&mut len_bytes) {
-                    return Err(format!(
-                        "Encrypted file is truncated at chunk {} (reading chunk length): \
+            if let Err(_e) = input.read_exact(&mut len_bytes) {
+                return Err(format!(
+                    "Encrypted file is truncated at chunk {} (reading chunk length): \
                          the file may be corrupted or was not fully written to disk",
-                        chunk_index
-                    ).into());
-                }
-                let len = u64::from_be_bytes(len_bytes) as usize;
+                    chunk_index
+                )
+                .into());
+            }
+            let len = u64::from_be_bytes(len_bytes) as usize;
 
-                if len > max_chunk_size {
-                    return Err(format!(
-                        "Encrypted file is corrupted at chunk {}: \
+            if len > max_chunk_size {
+                return Err(format!(
+                    "Encrypted file is corrupted at chunk {}: \
                          chunk size {} bytes exceeds maximum {} bytes. \
                          The file may be damaged or is not a valid rpenc file",
-                        chunk_index, len, max_chunk_size
-                    ).into());
-                }
+                    chunk_index, len, max_chunk_size
+                )
+                .into());
+            }
 
-                ciphertext.resize(len, 0);
-                if let Err(_e) = input.read_exact(&mut ciphertext) {
-                    return Err(format!(
-                        "Encrypted file is truncated at chunk {} \
+            ciphertext.resize(len, 0);
+            if let Err(_e) = input.read_exact(&mut ciphertext) {
+                return Err(format!(
+                    "Encrypted file is truncated at chunk {} \
                          (expected {} bytes of ciphertext, got EOF): \
                          the file may be corrupted or was not fully written to disk",
-                        chunk_index, len
-                    ).into());
-                }
+                    chunk_index, len
+                )
+                .into());
+            }
 
-                // Verify chunk index via AAD to detect reordering/deletion/duplication
-                let aad = chunk_index.to_be_bytes();
-                let payload = Payload {
-                    msg: ciphertext.as_slice(),
-                    aad: &aad,
-                };
+            // Verify chunk index via AAD to detect reordering/deletion/duplication
+            let aad = chunk_index.to_be_bytes();
+            let payload = Payload {
+                msg: ciphertext.as_slice(),
+                aad: &aad,
+            };
 
-                let plaintext = cipher
-                    .decrypt(XNonce::from_slice(&nonce_bytes), payload)
-                    .map_err(|e| -> Box<dyn std::error::Error> {
-                        format!(
-                            "Frame decryption failed at chunk {}: {} \
+            let plaintext = cipher
+                .decrypt(XNonce::from_slice(&nonce_bytes), payload)
+                .map_err(|e| -> Box<dyn std::error::Error> {
+                    format!(
+                        "Frame decryption failed at chunk {}: {} \
                              (wrong password or corrupted data)",
-                            chunk_index, e
-                        )
-                        .into()
-                    })?;
+                        chunk_index, e
+                    )
+                    .into()
+                })?;
 
-                output.write_all(&plaintext)?;
-                chunk_index += 1;
+            output.write_all(&plaintext)?;
+            chunk_index += 1;
         }
     }
 

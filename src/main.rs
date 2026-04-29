@@ -94,8 +94,7 @@ impl Progress {
             let bar = ProgressBar::new_spinner();
             bar.enable_steady_tick(Duration::from_millis(pb_config.tick_interval_ms));
 
-            let tick_refs: Vec<&str> =
-                pb_config.tick_strings.iter().map(|s| s.as_str()).collect();
+            let tick_refs: Vec<&str> = pb_config.tick_strings.iter().map(|s| s.as_str()).collect();
             bar.set_style(
                 ProgressStyle::with_template(&pb_config.template)
                     .map_err(|e| format!("Invalid progressbar template in config: {}", e))?
@@ -315,7 +314,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let bar1 = Progress::start("Encrypting...", &cfg.progressbar)?;
             renc_core::encrypt_file(
                 &temp_archive_path.to_path_buf(),
-                &output.join(create_file_name(file_name, *full, &cfg.defaults.default_name)?),
+                &output.join(create_file_name(
+                    file_name,
+                    *full,
+                    &cfg.defaults.default_name,
+                )?),
                 &password,
                 Some(cfg.crypto.argon2_m_cost),
                 Some(cfg.crypto.argon2_t_cost),
