@@ -1,12 +1,17 @@
 #!/bin/bash
 
+# rpenc.sh — portable launcher for rpenc-cli
+# Handles FAT32/exFAT/NTFS filesystems where +x permission bit is absent
+
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "$0")")" && pwd)"
+
 random_string() {
-    chars=({A..Z} {a..z} {0..9})
-    random_string=""
+    local chars=({A..Z} {a..z} {0..9})
+    local result=""
     for i in {1..6}; do
-        random_string+=${chars[RANDOM % ${#chars[@]}]}
+        result+=${chars[RANDOM % ${#chars[@]}]}
     done
-    echo "$random_string"
+    echo "$result"
 }
 
 detect_os() {
@@ -21,14 +26,43 @@ detect_os() {
 }
 
 OS=$(detect_os)
-ARCH=$(uname -m)
+RAW_ARCH=$(uname -m)
 
+# Normalize architecture names
+case "$RAW_ARCH" in
+    i386|i486|i586|i686) ARCH="i586" ;;
+    x86_64|amd64)        ARCH="x86_64" ;;
+    aarch64|arm64)       ARCH="aarch64" ;;
+    *)                   ARCH="$RAW_ARCH" ;;
+esac
+
+# Build list of candidate binary names in priority order:
+# 1. Dynamic (gnu) — faster, requires system glibc
+# 2. Static (musl) — universal fallback, works everywhere
+# 3. Plain name — for custom/single builds
 case "$OS" in
-    "Linux")        EXEC="bin/rpenc-linux-$ARCH" ;;
-    "macOS")        EXEC="bin/rpenc-macos-$ARCH" ;;
-    "FreeBSD")      EXEC="bin/rpenc-freebsd-$ARCH" ;;   
-    "OpenBSD")      EXEC="bin/rpenc-openbsd-$ARCH" ;;   
-    "NetBSD")       EXEC="bin/rpenc-netbsd-$ARCH" ;;   
+    "Linux")
+        CANDIDATES=(
+            "bin/rpenc-linux-${ARCH}-gnu"
+            "bin/rpenc-linux-${ARCH}-musl"
+            "bin/rpenc-linux-${ARCH}"
+        ) ;;
+    "macOS")
+        CANDIDATES=(
+            "bin/rpenc-macos-${ARCH}"
+        ) ;;
+    "FreeBSD")
+        CANDIDATES=(
+            "bin/rpenc-freebsd-${ARCH}"
+        ) ;;
+    "OpenBSD")
+        CANDIDATES=(
+            "bin/rpenc-openbsd-${ARCH}"
+        ) ;;
+    "NetBSD")
+        CANDIDATES=(
+            "bin/rpenc-netbsd-${ARCH}"
+        ) ;;
     *)
         echo "Unsupported OS or architecture: $OS"
         echo "If you are on Windows use rpenc.bat"
@@ -36,56 +70,62 @@ case "$OS" in
         ;;
 esac
 
-if [ ! -f "$EXEC" ]; then
-    echo "There isn't file $EXEC, maybe you can find it in https://github.com/Cinnamon415/rpenc-cli/releases or if it isn't exist you can compile it from source."
+# Find first available binary
+EXEC_FULL=""
+for candidate in "${CANDIDATES[@]}"; do
+    if [ -f "$SCRIPT_DIR/$candidate" ]; then
+        EXEC_FULL="$SCRIPT_DIR/$candidate"
+        break
+    fi
+done
+
+if [ -z "$EXEC_FULL" ]; then
+    echo "No binary found for $OS $ARCH. Searched for:"
+    for candidate in "${CANDIDATES[@]}"; do
+        echo "  - $SCRIPT_DIR/$candidate"
+    done
+    echo ""
+    echo "Download from https://github.com/Cinnamon415/rpenc-cli/releases or compile from source."
     exit 1
 fi
 
-if [[ -x "$EXEC" ]]; then
-    echo "Running $EXEC..."
-    ./"$EXEC" "$@"
-else
-    echo "Executing failed, trying to run via dynamic loader..."
-    
-    if [[ -x /lib64/ld-linux-x86-64.so.2 ]]; then
-        echo "Using /lib64/ld-linux-x86-64.so.2..."
-        /lib64/ld-linux-x86-64.so.2 "$EXEC" "$@" || { 
-            echo "Failed to execute with /lib64/ld-linux-x86-64.so.2, trying next method..."; 
-        }
-    fi
-
-    if [[ -x /lib/ld-linux-x86-64.so.2 ]]; then
-        echo "Using /lib/ld-linux-x86-64.so.2..."
-        /lib/ld-linux-x86-64.so.2 "$EXEC" "$@" || { 
-            echo "Failed to execute with /lib/ld-linux-x86-64.so.2."; 
-        }
-    else
-        echo "No suitable dynamic loader found."
-    fi
-
-    echo "Error: Executable '$EXEC' not found or not executable. Copying to /tmp..."
-    TEMP_EXEC="/tmp/rpenc-$(random_string)"
-    cp "$EXEC" "$TEMP_EXEC"
-    chmod +x "$TEMP_EXEC"
-
-    PARENT_DIR="$(dirname "$(realpath "$0")")"
-    ENCRYPTED_DIR="$PARENT_DIR/encrypted"
-
-    INPUT_DIR="$PARENT_DIR"
-    OUTPUT_DIR="$ENCRYPTED_DIR"
-    
-    while getopts "i:o:" opt; do
-        case $opt in
-            i) INPUT_DIR="$OPTARG" ;;
-            o) OUTPUT_DIR="$OPTARG" ;;
-        esac
-    done
-
-    if [[ "$1" == "encrypt" ]]; then
-        "$TEMP_EXEC" -i "$INPUT_DIR" -o "$OUTPUT_DIR" "$@" 
-    elif [[ "$1" == "decrypt" ]]; then
-        "$TEMP_EXEC" -i "$OUTPUT_DIR" -o "$INPUT_DIR" "$@"
-    else
-        "$TEMP_EXEC" "$@"
-    fi
+# =============================================
+# Method 1: Direct execution (filesystem supports +x)
+# =============================================
+if [[ -x "$EXEC_FULL" ]]; then
+    echo "Running $EXEC_FULL..."
+    "$EXEC_FULL" "$@"
+    exit $?
 fi
+
+echo "File is not executable (likely FAT32/exFAT/NTFS filesystem)."
+
+# =============================================
+# Method 2: ld-linux dynamic loader
+# Pass --real-exe so rpenc knows its real location
+# =============================================
+for LD in /lib64/ld-linux-x86-64.so.2 /lib/ld-linux-x86-64.so.2; do
+    if [[ -x "$LD" ]]; then
+        echo "Using $LD..."
+        "$LD" "$EXEC_FULL" --real-exe "$EXEC_FULL" "$@"
+        exit $?
+    fi
+done
+
+# =============================================
+# Method 3: Copy to /tmp and set +x
+# Pass --real-exe so rpenc knows its real location
+# =============================================
+echo "No suitable dynamic loader found. Copying to /tmp and setting +x..."
+
+TEMP_EXEC="/tmp/rpenc-$(random_string)"
+cp "$EXEC_FULL" "$TEMP_EXEC"
+chmod +x "$TEMP_EXEC"
+
+cleanup() {
+    rm -f "$TEMP_EXEC"
+}
+trap cleanup EXIT
+
+"$TEMP_EXEC" --real-exe "$EXEC_FULL" "$@"
+exit $?
